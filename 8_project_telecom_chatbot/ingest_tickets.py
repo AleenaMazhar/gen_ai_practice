@@ -1,0 +1,54 @@
+import os
+os.environ["TRANSFOERMERS_VERBOSITY"] = "error"
+import sqlite3
+from langchain_core.documents import Document
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+
+CHROMA_DIR = "chroma_store"
+COLLECTION = "faq"
+DB_PATH = os.path.join("data", "tickets.db")
+EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+def load_ticket_documents(db_path:str) -> list[Document]:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory=sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM tickets where status = 'resolved'"
+    ).fetchall()
+    conn.close()
+
+    docs=[]
+    for row in rows:
+        content = (
+            f"Issue: {row['issue_type']}\n"
+            f"Description: {row['description']}\n"
+            f"Resolution: {row['resolution']}"
+        )
+        docs.append(Document(
+            page_content=content,
+            metadata={
+                "source": "ticket",
+                "ticket_id": row["ticket_id"],
+                "category": row["category"],
+                "status": row["status"],
+            },
+        ))
+    return docs
+
+def main():
+    print("Loading ticket documents...")
+    docs = load_ticket_documents(DB_PATH)
+    print(f"Loaded {len(docs)} documents. Creating embeddings...")
+    embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+    vectorstore = Chroma.from_documents(
+        documents=docs,
+        embedding=embeddings,
+        persist_directory=CHROMA_DIR,
+        collection_name=COLLECTION
+    )
+
+    print("Persisting vectorstore to disk...")
+
+if __name__ == "__main__":
+    main()
